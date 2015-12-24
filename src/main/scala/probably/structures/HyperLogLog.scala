@@ -6,7 +6,7 @@ import probably.{ProbableResult, Stats, ProbableSet}
 import scala.util.Random
 
 class HyperLogLog(expectedErrorPercent:Double) extends ProbableSet with Serializable {
-  val hllMonoid = new HyperLogLogMonoid(HyperLogLog.bitsForError(expectedErrorPercent / 100))
+  val hllMonoid = new HyperLogLogMonoid(HyperLogLog.bitsForError(expectedErrorPercent))
   var hll = hllMonoid.zero
 
   override def put(key: String): Unit = hll = hll + hllMonoid.create(key.getBytes)
@@ -15,5 +15,5 @@ class HyperLogLog(expectedErrorPercent:Double) extends ProbableSet with Serializ
 
   override def putAll(keys: List[String]): Unit = keys.foreach(put)
 
-  override def getStats: Stats = Stats(hll.approximateSize.estimate, 0.0)
+  override def getStats: Stats = Stats(hll.approximateSize.estimate, expectedErrorPercent)
 }

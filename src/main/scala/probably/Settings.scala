@@ -1,8 +1,8 @@
 package probably
 
-import com.typesafe.config.Config
+import com.typesafe.config.{Config => TypesafeConfig}
 
-class Settings(config:Config) {
+class Settings(config:TypesafeConfig) {
   val httpHost = "0.0.0.0"
   val httpPort = config.getInt("probably.http.port")
   val expectedErrorPercent = config.getDouble("probably.expectedErrorPercent")

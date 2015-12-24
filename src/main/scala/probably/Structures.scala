@@ -8,16 +8,14 @@ import akka.util.Timeout
 import probably.structures.StructureFactory
 
 import scala.concurrent.ExecutionContext
+import scala.util.Success
 
-case class Create(name:String)
-case class GetOrCreate(name:String)
+case class Create(name:String, config:Config)
 case class Get(name:String)
 case class Exists(name:String)
 case class StructureSettings(expectedInsertions: Int)
 
-object Structures {
-  def structureName(set:String, name:String) = s"${set}-${name}"
-}
+case class ForwardTo[T](name:String, command:T)
 
 class Structures(structureFactory:StructureFactory[_],  expectedErrorPercent:Double) extends PersistentActor {
   var structures = Map[String, ActorRef]()
@@ -26,54 +24,36 @@ class Structures(structureFactory:StructureFactory[_],  expectedErrorPercent:Dou
   override def persistenceId: String = "all-structures"
 
   override def receiveRecover: Receive = {
-    case request:Create => sender ! create(request.name)
+    case request:Create => sender ! create(request.name, request.config)
     case RecoveryCompleted =>
   }
 
   override def receiveCommand: Receive = {
-    case request:Create => persist(request){request => sender ! create(request.name)}
-    case GetOrCreate(name) => if(structures contains name) self.forward(Get(name))
-                                else self.forward(Create(name))
+    case request:Create => persist(request){request => sender ! create(request.name, request.config)}
     case Get(name) => sender ! structures(name)
+    case ForwardTo(name, command) => if(structures contains name) structures(name) forward command else sender ! StructureNotFound
     case Exists(name) => sender ! (structures contains name)
     case m => logger.info(s"Ignoring $m")
   }
 
-  def create(name:String) = {
-    if(!(structures contains name))
-      structures = structures +
+  def create(name:String, config:Config) = {
+    structures = structures +
         (name -> context.system.actorOf(Props(classOf[Structure], name, structureFactory.create(expectedErrorPercent)), s"${structureFactory.name}-${name}"))
-    structures(name)
+
   }
 }
 
 
 class AllStructures(structures:Map[String, ActorRef])(implicit val timeout:Timeout, val context: ExecutionContext) extends AskSupport {
-  def addTo(set:String, name:String, key:String) = {
-    for(
-      structure <- (structures(set) ? GetOrCreate(name)).mapTo[ActorRef];
-      result <- (structure ? Add(key)).mapTo[Added]
-    ) yield result
-  }
+  def create(set: String, name: String, config: Config) = structures(set) ! Create(name, config)
 
-  def addAllTo(set:String, name:String, keys:List[String]) = {
-    for(structure <- (structures(set) ? GetOrCreate(name)).mapTo[ActorRef])
-      structure ! AddAll(keys)
-  }
+  def addTo(set:String, name:String, key:String) = (structures(set) ? ForwardTo(name, Add(key))).mapTo[Result[Added]]
 
-  def getFrom(set:String, name:String, key:String) = {
-    for(
-      structure <- (structures(set) ? Get(name)).mapTo[ActorRef];
-      result <- (structure ? IsPresent(key)).mapTo[ProbableResult]
-    ) yield result
-  }
+  def addAllTo(set:String, name:String, keys:List[String]) = structures(set) ! ForwardTo(name, AddAll(keys))
 
-  def statsOf(set:String, name:String) = {
-   for(
-     structure <- (structures(set) ? Get(name)).mapTo[ActorRef];
-     result <- (structure ? GetStats).mapTo[Stats]
-   ) yield result
-  }
+  def getFrom(set:String, name:String, key:String) = (structures(set) ? ForwardTo(name, IsPresent(key))).mapTo[Result[ProbableResult]]
+
+  def statsOf(set:String, name:String) = (structures(set) ? ForwardTo(name, GetStats)).mapTo[Result[Stats]]
 
   def exists(set:String, name:String) = (structures(set) ? Exists(name)).mapTo[Boolean]
 }

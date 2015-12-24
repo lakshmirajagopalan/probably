@@ -17,12 +17,14 @@ import probably.structures.{BloomFilterFactory, HyperLogLogFactory}
 import spray.json.DefaultJsonProtocol._
 
 case class NotFoundMessage(name:String,message: String = "Not found")
+case class Config(expectedError:Double, expectedInsertions:Long)
 
 trait Protocols {
   implicit val addedFormat = jsonFormat1(Added.apply)
   implicit val probableResultFormat = jsonFormat2(ProbableResult.apply)
   implicit val statsFormat = jsonFormat2(Stats.apply)
   implicit val notFoundFormat = jsonFormat2(NotFoundMessage.apply)
+  implicit val configFormat = jsonFormat2(Config.apply)
 }
 
 
@@ -42,27 +44,38 @@ object Main extends App with AskSupport with Protocols {
 
 
   val routes:Route = path(setSegment/Segment) { (set,name) =>
-      (post & entity(as[List[String]])) { keys =>
+      (post & entity(as[Config])){ config =>
+        complete{
+          (allStructures exists(set, name)).map[ToResponseMarshallable] { exists =>
+            if(exists) Conflict else { allStructures create(set,name, config); Created}
+          }
+        }
+      } ~ (put & entity(as[List[String]])) { keys =>
         complete {
           allStructures addAllTo(set, name, keys)
           Accepted
         }
       } ~ get {
         complete {
-          (allStructures exists (set, name)).map[ToResponseMarshallable] { exists =>
-            if(exists) allStructures statsOf (set,name) else NotFound -> NotFoundMessage(name)
+          (allStructures statsOf (set,name)).map[ToResponseMarshallable] {
+            case Ok(stats) => stats
+            case StructureNotFound => NotFound -> NotFoundMessage(name)
           }
         }
       }
     }~path(setSegment/Segment/Segment) { (set, name,key)=> {
           put {
             complete {
-              allStructures addTo (set, name, key)
+              (allStructures addTo (set, name, key)).map[ToResponseMarshallable] {
+                case Ok(result) => result
+                case StructureNotFound => NotFound -> NotFoundMessage(name)
+              }
             }
           } ~ get {
               complete {
-                (allStructures exists (set,name)).map[ToResponseMarshallable] { exists =>
-                  if(exists) allStructures getFrom(set, name, key) else NotFound -> NotFoundMessage(name)
+                (allStructures getFrom (set, name, key)).map[ToResponseMarshallable] {
+                  case Ok(isPresent) => isPresent
+                  case StructureNotFound => NotFound -> NotFoundMessage(name)
                 }
               }
             }

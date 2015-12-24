@@ -5,8 +5,6 @@ import akka.persistence.{SnapshotOffer, RecoveryCompleted, PersistentActor}
 import scala.concurrent.duration.DurationInt
 
 case class ProbableResult(value:Boolean, probability:Double)
-
-
 case class Add(key:String)
 case class AddAll(keys:List[String])
 case class IsPresent(key:String)
@@ -45,13 +43,13 @@ class Structure(name:String, startState:ProbableSet) extends PersistentActor {
   override def receiveCommand: Receive = {
     case add:Add =>
       val _sender = sender()
-      persist(add){add => structure.put(add.key); _sender ! Added(add.key)}
+      persist(add){add => structure.put(add.key); _sender ! Ok(Added(add.key))}
       haveEditsSinceLastSnapshot = true
     case addAll:AddAll =>
       persist(addAll){addAll => structure.putAll(addAll.keys)}
       haveEditsSinceLastSnapshot = true
-    case IsPresent(key) => sender ! structure.isPresent(key)
-    case GetStats => sender ! structure.getStats
+    case IsPresent(key) => sender ! Ok(structure.isPresent(key))
+    case GetStats => sender ! Ok(structure.getStats)
     case SnapshotTick => {
       if(haveEditsSinceLastSnapshot) saveSnapshot(structure)
       haveEditsSinceLastSnapshot = false
